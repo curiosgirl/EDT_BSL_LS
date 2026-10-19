@@ -2,7 +2,7 @@
 <feature
       id="ru.capralow.dt.bslls.validator"
       label="%featureName"
-      version="0.15.0.qualifier"
+      version="1.0.0.qualifier"
       provider-name="%providerName">
 
    <description>
@@ -46,14 +46,13 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
    </license>
 
    <requires>
-      <import plugin="com._1c.g5.v8.dt.product.application" version="1.16.0" match="greaterOrEqual"/>
+      <import plugin="com._1c.g5.v8.dt.product.application" version="1.32.0" match="greaterOrEqual"/>
    </requires>
 
    <plugin
          id="ru.capralow.dt.bslls.validator.plugin.ui"
          download-size="0"
          install-size="0"
-         version="0.0.0"
-         unpack="false"/>
+         version="0.0.0"/>
 
 </feature>

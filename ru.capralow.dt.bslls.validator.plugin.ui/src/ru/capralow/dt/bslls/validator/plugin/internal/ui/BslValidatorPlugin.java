@@ -53,6 +53,13 @@ public class BslValidatorPlugin
 
     private Injector injector;
 
+    private final BslLanguageServerManager serverManager = new BslLanguageServerManager();
+
+    BslLanguageServerManager getServerManager()
+    {
+        return serverManager;
+    }
+
     public synchronized Injector getInjector()
     {
         if (injector == null)
@@ -71,6 +78,7 @@ public class BslValidatorPlugin
     @Override
     public void stop(BundleContext bundleContext) throws Exception
     {
+        serverManager.stopAll();
         plugin = null;
         super.stop(bundleContext);
     }

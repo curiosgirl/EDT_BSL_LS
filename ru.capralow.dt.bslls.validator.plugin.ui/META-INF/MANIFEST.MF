@@ -2,14 +2,16 @@ Manifest-Version: 1.0
 Bundle-ManifestVersion: 2
 Bundle-Name: %pluginName
 Bundle-SymbolicName: ru.capralow.dt.bslls.validator.plugin.ui;singleton:=true
-Bundle-Version: 0.15.0.qualifier
+Bundle-Version: 1.0.0.qualifier
 Bundle-Activator: ru.capralow.dt.bslls.validator.plugin.internal.ui.BslValidatorPlugin
 Bundle-Vendor: %providerName
 Require-Bundle: org.eclipse.core.runtime,
+ org.eclipse.core.resources,
+ org.eclipse.jface,
  org.eclipse.ui,
  org.eclipse.xtext.ui
 Bundle-Localization: plugin
-Bundle-RequiredExecutionEnvironment: JavaSE-11
+Bundle-RequiredExecutionEnvironment: JavaSE-17
 Automatic-Module-Name: dt.validator.bsl-language-server.plugin
 Bundle-ActivationPolicy: lazy
 Import-Package: com._1c.g5.v8.dt.bsl.model,
@@ -32,5 +34,7 @@ Import-Package: com._1c.g5.v8.dt.bsl.model,
  org.eclipse.xtext.util,
  org.eclipse.xtext.validation
 Bundle-ClassPath: .,
- bsl-language-server.jar
+ lib/org.eclipse.lsp4j.jar,
+ lib/org.eclipse.lsp4j.jsonrpc.jar,
+ lib/gson.jar
 Export-Package: ru.capralow.dt.bslls.validator.plugin.internal.ui;x-internal:=true

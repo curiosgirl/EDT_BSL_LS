@@ -1,28 +1,37 @@
 package ru.capralow.dt.bslls.validator.plugin.internal.ui;
 
-import java.io.File;
+import java.io.IOException;
+import java.net.URI;
+import java.nio.file.FileSystemNotFoundException;
+import java.nio.file.Paths;
 import java.text.MessageFormat;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.TimeoutException;
 
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.ResourcesPlugin;
+import org.eclipse.core.runtime.IPath;
 import org.eclipse.core.runtime.Path;
-import org.eclipse.core.runtime.Platform;
 import org.eclipse.emf.ecore.EObject;
 import org.eclipse.emf.ecore.util.EcoreUtil;
 import org.eclipse.jface.text.BadLocationException;
 import org.eclipse.jface.text.Document;
 import org.eclipse.lsp4j.CodeAction;
 import org.eclipse.lsp4j.Diagnostic;
+import org.eclipse.lsp4j.DiagnosticSeverity;
+import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.Range;
+import org.eclipse.lsp4j.TextDocumentEdit;
 import org.eclipse.lsp4j.TextEdit;
+import org.eclipse.lsp4j.WorkspaceEdit;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.eclipse.xtext.nodemodel.ICompositeNode;
 import org.eclipse.xtext.nodemodel.util.NodeModelUtils;
@@ -34,251 +43,19 @@ import com._1c.g5.v8.dt.bsl.validation.CustomValidationMessageAcceptor;
 import com._1c.g5.v8.dt.bsl.validation.IExternalBslValidator;
 import com._1c.g5.v8.dt.core.platform.IV8Project;
 import com._1c.g5.v8.dt.core.platform.IV8ProjectManager;
-import com.github._1c_syntax.bsl.languageserver.codeactions.QuickFixSupplier;
-import com.github._1c_syntax.bsl.languageserver.configuration.Language;
-import com.github._1c_syntax.bsl.languageserver.configuration.LanguageServerConfiguration;
-import com.github._1c_syntax.bsl.languageserver.configuration.diagnostics.DiagnosticsOptions;
-import com.github._1c_syntax.bsl.languageserver.context.DocumentContext;
-import com.github._1c_syntax.bsl.languageserver.context.ServerContext;
-import com.github._1c_syntax.bsl.languageserver.diagnostics.BSLDiagnostic;
-import com.github._1c_syntax.bsl.languageserver.diagnostics.CodeBlockBeforeSubDiagnostic;
-import com.github._1c_syntax.bsl.languageserver.diagnostics.CommonModuleAssignDiagnostic;
-import com.github._1c_syntax.bsl.languageserver.diagnostics.DeprecatedMethodCallDiagnostic;
-import com.github._1c_syntax.bsl.languageserver.diagnostics.DiagnosticSupplier;
-import com.github._1c_syntax.bsl.languageserver.diagnostics.FunctionShouldHaveReturnDiagnostic;
-import com.github._1c_syntax.bsl.languageserver.diagnostics.LineLengthDiagnostic;
-import com.github._1c_syntax.bsl.languageserver.diagnostics.ParseErrorDiagnostic;
-import com.github._1c_syntax.bsl.languageserver.diagnostics.ProcedureReturnsValueDiagnostic;
-import com.github._1c_syntax.bsl.languageserver.diagnostics.QuickFixProvider;
-import com.github._1c_syntax.bsl.languageserver.diagnostics.ThisObjectAssignDiagnostic;
-import com.github._1c_syntax.bsl.languageserver.diagnostics.TypoDiagnostic;
-import com.github._1c_syntax.bsl.languageserver.diagnostics.UnknownPreprocessorSymbolDiagnostic;
-import com.github._1c_syntax.bsl.languageserver.diagnostics.UnreachableCodeDiagnostic;
-import com.github._1c_syntax.bsl.languageserver.diagnostics.UnusedLocalMethodDiagnostic;
-import com.github._1c_syntax.bsl.languageserver.diagnostics.UsingServiceTagDiagnostic;
-import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticInfo;
-import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticType;
-import com.github._1c_syntax.bsl.languageserver.providers.DiagnosticProvider;
-import com.github._1c_syntax.mdclasses.metadata.additional.ConfigurationSource;
 import com.google.inject.Inject;
 
 public class BslValidator
     implements IExternalBslValidator
 {
-    private class ProjectContext
-    {
-
-        private static final String BSL_LS_FILENAME = ".bsl-language-server.json"; //$NON-NLS-1$
-
-        private DiagnosticSupplier diagnosticSupplier;
-        private DiagnosticProvider diagnosticProvider;
-        private Language diagnosticLanguage;
-        private QuickFixSupplier quickFixSuplier;
-        private ServerContext bslServerContext;
-
-        public ProjectContext(IProject project)
-        {
-            LanguageServerConfiguration lsConfiguration = initializeLsConfiguration(project);
-
-            diagnosticLanguage = lsConfiguration.getLanguage();
-            diagnosticSupplier = new DiagnosticSupplier(lsConfiguration);
-            diagnosticProvider = new DiagnosticProvider(diagnosticSupplier);
-            quickFixSuplier = new QuickFixSupplier(diagnosticSupplier);
-
-            bslServerContext = new ServerContext(project.getLocation().toFile().toPath());
-            bslServerContext.populateContext();
-
-            ConfigurationSource configurationSource = bslServerContext.getConfiguration().getConfigurationSource();
-
-            String medatadaDesc = ""; //$NON-NLS-1$
-            if (configurationSource.equals(ConfigurationSource.EDT))
-                medatadaDesc = "с EDT метаданными"; //$NON-NLS-1$
-
-            else if (configurationSource.equals(ConfigurationSource.EMPTY))
-                medatadaDesc = "БЕЗ метаданных"; //$NON-NLS-1$
-
-            else if (configurationSource.equals(ConfigurationSource.DESIGNER))
-                medatadaDesc = "c метаданными КОНФИГУРАТОРА"; //$NON-NLS-1$
-
-            else
-                medatadaDesc = "c НЕИЗВЕСТНЫМИ метаданными"; //$NON-NLS-1$
-
-            String initializationMessage =
-                MessageFormat.format("{0}Инициализация {1}: {2}", BSL_LS_PREFIX, medatadaDesc, project.getName()); //$NON-NLS-1$
-
-            BslValidatorPlugin.log(BslValidatorPlugin.createInfoStatus(initializationMessage));
-        }
-
-        private LanguageServerConfiguration initializeLsConfiguration(IProject project)
-        {
-            File configurationFile = null;
-            LanguageServerConfiguration lsConfiguration;
-
-            Collection<String> configurationFilePathes = new ArrayList<>();
-            configurationFilePathes.add(project.getLocation() + File.separator + BSL_LS_FILENAME);
-            configurationFilePathes.add(project.getLocation().toFile().getParent() + File.separator + BSL_LS_FILENAME);
-            configurationFilePathes.add(Platform.getLocation() + File.separator + BSL_LS_FILENAME);
-
-            for (String configurationFilePath : configurationFilePathes)
-            {
-                configurationFile = new File(configurationFilePath);
-                if (configurationFile.exists())
-                    break;
-            }
-
-            if (configurationFile == null || !configurationFile.exists())
-            {
-                lsConfiguration = LanguageServerConfiguration.create();
-
-                String initializationMessage =
-                    BSL_LS_PREFIX.concat(project.getName()).concat(" - БЕЗ конфигурационного файла"); //$NON-NLS-1$
-                BslValidatorPlugin.log(BslValidatorPlugin.createInfoStatus(initializationMessage));
-
-            }
-            else
-            {
-                String initializationMessage =
-                    BSL_LS_PREFIX.concat(project.getName()).concat(" - Конфигурационный файл: ") //$NON-NLS-1$
-                        .concat(configurationFile.getPath());
-                BslValidatorPlugin.log(BslValidatorPlugin.createInfoStatus(initializationMessage));
-
-                lsConfiguration = LanguageServerConfiguration.create(configurationFile);
-
-            }
-
-            DiagnosticsOptions diagnosticOptions = lsConfiguration.getDiagnosticsOptions();
-
-            Map<String, Either<Boolean, Map<String, Object>>> diagnostics = diagnosticOptions.getParameters();
-            if (diagnostics == null)
-                diagnostics = new HashMap<>();
-
-            Collection<Class<? extends BSLDiagnostic>> duplicateDiagnostics = new ArrayList<>();
-
-            // Свои механизмы в EDT
-            duplicateDiagnostics.add(LineLengthDiagnostic.class);
-            duplicateDiagnostics.add(ParseErrorDiagnostic.class);
-            duplicateDiagnostics.add(TypoDiagnostic.class);
-            duplicateDiagnostics.add(UsingServiceTagDiagnostic.class);
-
-            // Диагностики есть в EDT
-            duplicateDiagnostics.add(CodeBlockBeforeSubDiagnostic.class);
-            duplicateDiagnostics.add(CommonModuleAssignDiagnostic.class);
-            duplicateDiagnostics.add(DeprecatedMethodCallDiagnostic.class);
-            duplicateDiagnostics.add(FunctionShouldHaveReturnDiagnostic.class);
-            duplicateDiagnostics.add(ProcedureReturnsValueDiagnostic.class);
-            duplicateDiagnostics.add(ThisObjectAssignDiagnostic.class);
-            duplicateDiagnostics.add(UnknownPreprocessorSymbolDiagnostic.class);
-            duplicateDiagnostics.add(UnreachableCodeDiagnostic.class);
-            duplicateDiagnostics.add(UnusedLocalMethodDiagnostic.class);
-
-            // В настройках можно принудительно включить выключенные диагностики
-            for (Class<? extends BSLDiagnostic> diagnostic : duplicateDiagnostics)
-            {
-                DiagnosticInfo diagnosticInfo = new DiagnosticInfo(diagnostic, lsConfiguration.getLanguage());
-                String diagnocticCode = diagnosticInfo.getCode().getStringValue();
-                if (!diagnostics.containsKey(diagnocticCode))
-                    diagnostics.put(diagnocticCode, falseForLeft);
-            }
-
-            diagnosticOptions.setParameters(diagnostics);
-
-            return lsConfiguration;
-        }
-    }
+    static final String BSL_LS_PREFIX = "[BSL LS] "; //$NON-NLS-1$
 
     private static final String QUICKFIX_CODE = "bsl-language-server"; //$NON-NLS-1$
 
-    private static final String BSL_LS_PREFIX = "[BSL LS] "; //$NON-NLS-1$
-
-    private static final Either<Boolean, Map<String, Object>> falseForLeft = Either.forLeft(false);
-
-    private static StringBuilder getIssueData(Diagnostic diagnostic, Class<? extends BSLDiagnostic> bslDiagnosticClass,
-        DocumentContext documentContext, Document doc, ProjectContext projectContext)
-    {
-        StringBuilder issueData = new StringBuilder();
-
-        if (documentContext == null || !QuickFixProvider.class.isAssignableFrom(bslDiagnosticClass))
-            return issueData;
-
-        Optional<Class<? extends QuickFixProvider>> quickFixClass =
-            projectContext.quickFixSuplier.getQuickFixClass(diagnostic.getCode());
-
-        if (!quickFixClass.isPresent())
-            return issueData;
-
-        QuickFixProvider quickFixProvider = projectContext.quickFixSuplier.getQuickFixInstance(quickFixClass.get());
-
-        List<CodeAction> quickFixes =
-            quickFixProvider.getQuickFixes(Collections.singletonList(diagnostic), null, documentContext);
-
-        for (CodeAction quickFix : quickFixes)
-        {
-            List<TextEdit> changes = quickFix.getEdit().getChanges().get(documentContext.getUri().toString());
-            if (changes.size() != 1)
-                continue;
-
-            TextEdit change = changes.get(0);
-            Integer[] offsetAndLength = getOffsetAndLength(change.getRange(), doc);
-            Integer offset = offsetAndLength[0];
-            Integer length = offsetAndLength[1];
-
-            List<String> issueLine = new ArrayList<>();
-            issueLine.add(BSL_LS_PREFIX.concat(quickFix.getTitle()));
-            issueLine.add(diagnostic.getMessage());
-            issueLine.add(offset.toString());
-            issueLine.add(length.toString());
-            issueLine.add(change.getNewText());
-
-            if (issueData.length() != 0)
-                issueData.append(System.lineSeparator());
-            issueData.append(String.join("|", issueLine)); //$NON-NLS-1$
-        }
-
-        return issueData;
-
-    }
-
-    private static Integer[] getOffsetAndLength(Range range, Document doc)
-    {
-        Integer offset = 0;
-        Integer length = 0;
-        try
-        {
-            offset = doc.getLineOffset(range.getStart().getLine()) + range.getStart().getCharacter();
-            Integer endOffset = doc.getLineOffset(range.getEnd().getLine()) + range.getEnd().getCharacter();
-            length = endOffset - offset;
-
-        }
-        catch (BadLocationException e)
-        {
-            BslValidatorPlugin.log(
-                BslValidatorPlugin.createErrorStatus(Messages.BslValidator_Bad_Location_Exception, e));
-
-        }
-
-        Integer[] result = new Integer[2];
-        result[0] = offset;
-        result[1] = length;
-
-        return result;
-    }
-
-    private Map<IProject, ProjectContext> projectsContext;
+    private static final long LONG_VALIDATION_MILLIS = 10000;
 
     @Inject
     private IV8ProjectManager projectManager;
-
-    public BslValidator()
-    {
-        super();
-
-        projectsContext = new HashMap<>();
-        for (IProject project : ResourcesPlugin.getWorkspace().getRoot().getProjects())
-        {
-            ProjectContext projectContext = new ProjectContext(project);
-            projectsContext.put(project, projectContext);
-        }
-    }
 
     @Override
     public boolean needValidation(EObject object)
@@ -292,43 +69,6 @@ public class BslValidator
     @Override
     public void validate(EObject object, CustomValidationMessageAcceptor messageAcceptor, CancelIndicator monitor)
     {
-        validateModule(object, messageAcceptor, monitor);
-    }
-
-    private void registerIssue(EObject object, CustomValidationMessageAcceptor messageAcceptor, Diagnostic diagnostic,
-        DocumentContext documentContext, Document doc, ProjectContext projectContext)
-    {
-
-        Optional<Class<? extends BSLDiagnostic>> diagnosticClass =
-            projectContext.diagnosticSupplier.getDiagnosticClass(diagnostic.getCode());
-
-        if (!diagnosticClass.isPresent())
-            return;
-
-        Class<? extends BSLDiagnostic> bslDiagnosticClass = diagnosticClass.get();
-        DiagnosticInfo diagnosticInfo = new DiagnosticInfo(bslDiagnosticClass, projectContext.diagnosticLanguage);
-
-        Integer[] offsetAndLength = getOffsetAndLength(diagnostic.getRange(), doc);
-        Integer offset = offsetAndLength[0];
-        Integer length = offsetAndLength[1];
-
-        StringBuilder issueData = getIssueData(diagnostic, bslDiagnosticClass, documentContext, doc, projectContext);
-
-        String diagnosticMessage = BSL_LS_PREFIX.concat(diagnostic.getMessage());
-
-        DiagnosticType diagnosticType = diagnosticInfo.getType();
-        if (diagnosticType.equals(DiagnosticType.ERROR) || diagnosticType.equals(DiagnosticType.VULNERABILITY))
-            messageAcceptor.acceptError(diagnosticMessage, object, offset, length, QUICKFIX_CODE, issueData.toString());
-
-        else
-            messageAcceptor.acceptWarning(diagnosticMessage, object, offset, length, QUICKFIX_CODE,
-                issueData.toString());
-
-    }
-
-    private void validateModule(EObject object, CustomValidationMessageAcceptor messageAcceptor,
-        CancelIndicator monitor)
-    {
         if (monitor.isCanceled())
             return;
 
@@ -336,53 +76,253 @@ public class BslValidator
         if (v8Project == null)
             return;
 
-        ProjectContext projectContext = projectsContext.get(v8Project.getProject());
-        if (projectContext == null)
+        IProject project = v8Project.getProject();
+        BslLanguageServerManager serverManager = BslValidatorPlugin.getDefault().getServerManager();
+        BslLanguageServerProcess server = serverManager.getServer(project);
+        if (server == null)
             return;
-
-        long startTime = System.currentTimeMillis();
-        BslValidatorPlugin.log(
-            BslValidatorPlugin.createInfoStatus(BSL_LS_PREFIX.concat("Начало передачи текста модуля"))); //$NON-NLS-1$
 
         Module module = (Module)object;
         IFile moduleFile =
             ResourcesPlugin.getWorkspace().getRoot().getFile(new Path(EcoreUtil.getURI(module).toPlatformString(true)));
+        IPath moduleLocation = moduleFile.getLocation();
+        if (moduleLocation == null)
+            return;
 
         ICompositeNode node = NodeModelUtils.findActualNodeFor(module);
-        String objectText = node.getText();
+        if (node == null)
+            return;
 
-        Document doc = new Document(objectText);
+        String moduleText = node.getText();
+        Document doc = new Document(moduleText);
+        String moduleUri = moduleLocation.toFile().toPath().toUri().toString();
 
-        DocumentContext documentContext =
-            projectContext.bslServerContext.addDocument(moduleFile.getLocationURI(), objectText);
+        long startTime = System.currentTimeMillis();
+        BslLanguageServerProcess.AnalysisResult result;
+        try
+        {
+            result = server.analyze(moduleUri, moduleText, wholeDocumentRange(doc), moduleTimeout(),
+                monitor::isCanceled);
+        }
+        catch (CancellationException e)
+        {
+            return;
+        }
+        catch (TimeoutException e)
+        {
+            String problem = server.isReady()
+                ? MessageFormat.format("Проверка модуля не уложилась в таймаут: {0}", moduleLocation) //$NON-NLS-1$
+                : "Сервер еще индексирует проект, модули пропускаются до окончания запуска"; //$NON-NLS-1$
+            serverManager.reportProblem(project, problem);
+            return;
+        }
+        catch (IOException e)
+        {
+            serverManager.reportProblem(project, e.getMessage());
+            return;
+        }
+        catch (InterruptedException e)
+        {
+            Thread.currentThread().interrupt();
+            return;
+        }
+        serverManager.clearProblem(project);
 
-        long computeStartTime = System.currentTimeMillis();
-        List<Diagnostic> diagnostics = projectContext.diagnosticProvider.computeDiagnostics(documentContext);
-        long computeDifference = System.currentTimeMillis() - computeStartTime;
-        int findNodeAmount = diagnostics.size();
-        for (Diagnostic diagnostic : diagnostics)
+        Map<String, List<CodeAction>> quickFixes = groupQuickFixes(result.quickFixes);
+        for (Diagnostic diagnostic : result.diagnostics)
         {
             if (monitor.isCanceled())
-                break;
+                return;
 
-            registerIssue(object, messageAcceptor, diagnostic, documentContext, doc, projectContext);
-
+            registerIssue(object, messageAcceptor, diagnostic, quickFixes.get(diagnosticKey(diagnostic)), moduleUri,
+                doc);
         }
 
-        projectContext.diagnosticProvider.clearComputedDiagnostics(documentContext);
-        documentContext.clearSecondaryData();
-
         long difference = System.currentTimeMillis() - startTime;
-
-        if (difference > 10000)
-            BslValidatorPlugin.log(BslValidatorPlugin.createInfoStatus(
-                BSL_LS_PREFIX.concat("URI модуля длительной проверки: ").concat(moduleFile.getLocation().toString()))); //$NON-NLS-1$
-
-        String differenceText = MessageFormat.format("(всего:{0}сек,анализ:{1}сек/{2}проб)", //$NON-NLS-1$
-            Long.toString(difference / 1000), Long.toString(computeDifference / 1000), String.valueOf(findNodeAmount));
-
-        BslValidatorPlugin.log(BslValidatorPlugin.createInfoStatus(
-            BSL_LS_PREFIX.concat("Окончание передачи текста модуля ").concat(differenceText))); //$NON-NLS-1$
+        if (difference > LONG_VALIDATION_MILLIS)
+            BslValidatorPlugin.log(BslValidatorPlugin.createInfoStatus(MessageFormat.format(
+                "{0}Долгая проверка модуля ({1} сек): {2}", BSL_LS_PREFIX, difference / 1000, moduleLocation))); //$NON-NLS-1$
     }
 
+    private static Duration moduleTimeout()
+    {
+        int seconds = BslValidatorPlugin.getDefault().getPreferenceStore()
+            .getInt(PreferenceConstants.MODULE_TIMEOUT_SECONDS);
+        return Duration.ofSeconds(seconds > 0 ? seconds : PreferenceConstants.DEFAULT_MODULE_TIMEOUT_SECONDS);
+    }
+
+    private static Range wholeDocumentRange(Document doc)
+    {
+        int lastLine = Math.max(doc.getNumberOfLines() - 1, 0);
+        int lastLineLength = 0;
+        try
+        {
+            lastLineLength = doc.getLineLength(lastLine);
+        }
+        catch (BadLocationException e)
+        {
+            // Пустой документ
+        }
+        return new Range(new Position(0, 0), new Position(lastLine, lastLineLength));
+    }
+
+    private static Map<String, List<CodeAction>> groupQuickFixes(List<CodeAction> quickFixes)
+    {
+        Map<String, List<CodeAction>> result = new HashMap<>();
+        for (CodeAction quickFix : quickFixes)
+        {
+            if (quickFix.getDiagnostics() == null)
+                continue;
+
+            for (Diagnostic diagnostic : quickFix.getDiagnostics())
+                result.computeIfAbsent(diagnosticKey(diagnostic), key -> new ArrayList<>()).add(quickFix);
+        }
+        return result;
+    }
+
+    /**
+     * Сервер возвращает в быстрых исправлениях копии диагностик, поля которых могут отличаться
+     * (например, пустой список tags), поэтому сопоставляем по коду и диапазону.
+     */
+    private static String diagnosticKey(Diagnostic diagnostic)
+    {
+        return diagnosticCode(diagnostic) + '@' + diagnostic.getRange();
+    }
+
+    private static void registerIssue(EObject object, CustomValidationMessageAcceptor messageAcceptor,
+        Diagnostic diagnostic, List<CodeAction> quickFixes, String moduleUri, Document doc)
+    {
+        int[] offsetAndLength = getOffsetAndLength(diagnostic.getRange(), doc);
+        if (offsetAndLength == null)
+            return;
+
+        String code = diagnosticCode(diagnostic);
+        String message = code.isEmpty() ? BSL_LS_PREFIX + diagnostic.getMessage()
+            : MessageFormat.format("{0}{1} ({2})", BSL_LS_PREFIX, diagnostic.getMessage(), code); //$NON-NLS-1$
+
+        String[] issueData = getIssueData(diagnostic, quickFixes, moduleUri, doc);
+
+        DiagnosticSeverity severity = diagnostic.getSeverity();
+        if (severity == DiagnosticSeverity.Error)
+            messageAcceptor.acceptError(message, object, offsetAndLength[0], offsetAndLength[1], QUICKFIX_CODE,
+                issueData);
+
+        else if (severity == null || severity == DiagnosticSeverity.Warning)
+            messageAcceptor.acceptWarning(message, object, offsetAndLength[0], offsetAndLength[1], QUICKFIX_CODE,
+                issueData);
+
+        else
+            messageAcceptor.acceptInfo(message, object, offsetAndLength[0], offsetAndLength[1], QUICKFIX_CODE,
+                issueData);
+    }
+
+    private static String diagnosticCode(Diagnostic diagnostic)
+    {
+        Either<String, Integer> code = diagnostic.getCode();
+        if (code == null)
+            return ""; //$NON-NLS-1$
+
+        return code.isLeft() ? code.getLeft() : String.valueOf(code.getRight());
+    }
+
+    private static String[] getIssueData(Diagnostic diagnostic, List<CodeAction> quickFixes, String moduleUri,
+        Document doc)
+    {
+        List<String> issueData = new ArrayList<>();
+        for (CodeAction quickFix : quickFixes == null ? List.<CodeAction>of() : quickFixes)
+        {
+            List<TextEdit> edits = getModuleEdits(quickFix.getEdit(), moduleUri);
+            if (edits.isEmpty())
+                continue;
+
+            List<QuickFixData.Edit> fixEdits = new ArrayList<>();
+            for (TextEdit edit : edits)
+            {
+                int[] offsetAndLength = getOffsetAndLength(edit.getRange(), doc);
+                if (offsetAndLength == null)
+                {
+                    fixEdits = null;
+                    break;
+                }
+                fixEdits.add(new QuickFixData.Edit(offsetAndLength[0], offsetAndLength[1], edit.getNewText()));
+            }
+
+            if (fixEdits == null || !QuickFixData.hasNoOverlaps(fixEdits))
+                continue;
+
+            fixEdits.sort(Comparator.comparingInt(QuickFixData.Edit::offset));
+            issueData.add(QuickFixData.encode(
+                new QuickFixData(BSL_LS_PREFIX + quickFix.getTitle(), diagnostic.getMessage(), fixEdits)));
+        }
+
+        for (QuickFixData suppression : SuppressionFixes.create(diagnosticCode(diagnostic),
+            diagnostic.getRange().getStart().getLine(), diagnostic.getMessage(), doc))
+            issueData.add(QuickFixData.encode(suppression));
+
+        return issueData.toArray(new String[0]);
+    }
+
+    /**
+     * Быстрые исправления, затрагивающие другие модули, не применяются: EDT правит только текущий документ.
+     */
+    private static List<TextEdit> getModuleEdits(WorkspaceEdit workspaceEdit, String moduleUri)
+    {
+        if (workspaceEdit == null)
+            return List.of();
+
+        Map<String, List<TextEdit>> editsByUri = new HashMap<>();
+        if (workspaceEdit.getChanges() != null)
+            editsByUri.putAll(workspaceEdit.getChanges());
+
+        if (workspaceEdit.getDocumentChanges() != null)
+        {
+            for (var documentChange : workspaceEdit.getDocumentChanges())
+            {
+                if (!documentChange.isLeft())
+                    return List.of();
+
+                TextDocumentEdit textDocumentEdit = documentChange.getLeft();
+                editsByUri.computeIfAbsent(textDocumentEdit.getTextDocument().getUri(), key -> new ArrayList<>())
+                    .addAll(textDocumentEdit.getEdits());
+            }
+        }
+
+        if (editsByUri.size() != 1)
+            return List.of();
+
+        Map.Entry<String, List<TextEdit>> entry = editsByUri.entrySet().iterator().next();
+        if (!sameUri(entry.getKey(), moduleUri))
+            return List.of();
+
+        Collection<TextEdit> edits = entry.getValue();
+        return edits == null ? List.of() : List.copyOf(edits);
+    }
+
+    private static boolean sameUri(String first, String second)
+    {
+        try
+        {
+            return Paths.get(URI.create(first)).equals(Paths.get(URI.create(second)));
+        }
+        catch (IllegalArgumentException | FileSystemNotFoundException e)
+        {
+            return first.equalsIgnoreCase(second);
+        }
+    }
+
+    private static int[] getOffsetAndLength(Range range, Document doc)
+    {
+        try
+        {
+            int offset = doc.getLineOffset(range.getStart().getLine()) + range.getStart().getCharacter();
+            int endOffset = doc.getLineOffset(range.getEnd().getLine()) + range.getEnd().getCharacter();
+            return new int[] { offset, endOffset - offset };
+        }
+        catch (BadLocationException e)
+        {
+            BslValidatorPlugin.log(
+                BslValidatorPlugin.createErrorStatus(Messages.BslValidator_Bad_Location_Exception, e));
+            return null;
+        }
+    }
 }

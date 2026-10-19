@@ -1,7 +1,9 @@
 package ru.capralow.dt.bslls.validator.plugin.internal.ui;
 
 import org.eclipse.emf.ecore.EObject;
+import org.eclipse.text.edits.MultiTextEdit;
 import org.eclipse.text.edits.ReplaceEdit;
+import org.eclipse.text.edits.TextEdit;
 import org.eclipse.xtext.ui.editor.quickfix.Fix;
 import org.eclipse.xtext.ui.editor.quickfix.IssueResolutionAcceptor;
 import org.eclipse.xtext.validation.Issue;
@@ -16,22 +18,34 @@ public class BslQuickFix
     public void processBslLanguageServerDiagnostic(final Issue issue, final IssueResolutionAcceptor acceptor)
     {
         String[] issueData = issue.getData();
+        if (issueData == null)
+            return;
+
         for (String issueLine : issueData)
         {
-            if (issueLine.isEmpty())
+            QuickFixData quickFix = QuickFixData.decode(issueLine);
+            if (quickFix == null)
                 continue;
 
-            String[] issueList = issueLine.split("[|]"); //$NON-NLS-1$
-
-            String issueCommand = issueList[0];
-            String issueMessage = issueList[1];
-            Integer issueOffset = Integer.decode(issueList[2]);
-            Integer issueLength = Integer.decode(issueList[3]);
-            String issueNewText = issueList.length == 5 ? issueList[4] : ""; //$NON-NLS-1$
-
-            acceptor.accept(issue, issueCommand, issueMessage, (String)null,
+            acceptor.accept(issue, quickFix.title, quickFix.description, (String)null,
                 new AbstractExternalQuickfixProvider.ExternalQuickfixModification<>(issue, EObject.class,
-                    module -> new ReplaceEdit(issueOffset, issueLength, issueNewText)));
+                    module -> createEdit(quickFix)));
         }
+    }
+
+    private static TextEdit createEdit(QuickFixData quickFix)
+    {
+        if (quickFix.edits.size() == 1)
+            return toReplaceEdit(quickFix.edits.get(0));
+
+        MultiTextEdit edit = new MultiTextEdit();
+        for (QuickFixData.Edit child : quickFix.edits)
+            edit.addChild(toReplaceEdit(child));
+        return edit;
+    }
+
+    private static ReplaceEdit toReplaceEdit(QuickFixData.Edit edit)
+    {
+        return new ReplaceEdit(edit.offset(), edit.length(), edit.newText() == null ? "" : edit.newText()); //$NON-NLS-1$
     }
 }
